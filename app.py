@@ -674,6 +674,7 @@ def troubleshooting(service: str) -> str:
     """
     return prompt
 
+
 if __name__ == "__main__":
     mcp.run(transport='sse', port=8081, host='0.0.0.0')
 
