@@ -1,0 +1,8 @@
+dotenv>=0.9.9
+fastmcp>=2.10.2
+netmiko>=4.6.0
+paramiko>=3.5.1
+pydantic>=2.11.7
+pynetbox>=7.5.0
+requests>=2.32.4
+urllib3>=2.5.0
