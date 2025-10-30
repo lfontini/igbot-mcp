@@ -1,0 +1,6 @@
+#!/bin/bash
+# chama o assemble original do Python S2I
+/usr/libexec/s2i/assemble
+
+# instala utilitários de rede
+microdnf install -y iputils traceroute || yum install -y iputils traceroute
