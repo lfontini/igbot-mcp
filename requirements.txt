@@ -6,4 +6,4 @@ pydantic>=2.11.7
 pynetbox>=7.5.0
 requests>=2.32.4
 urllib3>=2.5.0
-zabbix_utils
+zabbix-utils>=2.0.3
