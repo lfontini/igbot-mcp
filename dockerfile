@@ -3,13 +3,13 @@ FROM python:3.12-slim
 
 # Evitar perguntas interativas
 ENV DEBIAN_FRONTEND=noninteractive
-
-# Atualizar pacotes e instalar dependências do sistema
+# Instalar ferramentas de rede e git
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         iputils-ping \
         traceroute \
         git \
+        openssh-client \
         && rm -rf /var/lib/apt/lists/*
 
 # Criar diretório de trabalho
