@@ -19,7 +19,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar todo o código da aplicação
 COPY . .
 
 # Porta que o MCP irá rodar
