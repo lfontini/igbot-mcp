@@ -44,7 +44,7 @@ docker build -t mcp-igbot-server .
 To start the MCP container:
 
 ```bash
-docker run -d --name mcp -p 8080:8080 mcp-igbot-server
+docker run -d --env-file ./.env --name mcp -p 8080:8080 mcp-igbot-server
 ```
 
 * `-d` → runs in detached mode
