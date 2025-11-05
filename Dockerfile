@@ -1,36 +1,35 @@
-# Imagem base Ubuntu
-FROM ubuntu:22.04
+# Imagem base leve com Python 3.11
+FROM python:3.11-slim
 
-# Evitar prompts interativos
-ENV DEBIAN_FRONTEND=noninteractive
+# Evitar prompts interativos e reduzir logs
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PATH="/home/appuser/.local/bin:${PATH}"
 
-# Atualizar e instalar dependências básicas + Python + pip
+# Instalar dependências do sistema mínimas necessárias
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3 \
-        python3-pip \
         iputils-ping \
         traceroute \
         git \
         openssh-client \
-        && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Criar diretório de trabalho
 WORKDIR /app
 
-# Copiar requirements.txt e instalar dependências Python
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Copiar requirements e instalar dependências Python
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar o restante do código
+# Copiar o restante do código da aplicação
 COPY . .
 
-# Definir usuário não-root (obrigatório para OpenShift)
 RUN useradd -m appuser
 USER appuser
 
-# Expor a porta
+# Expor a porta usada pela aplicação
 EXPOSE 8080
 
-# Comando para iniciar o MCP
-CMD ["python3", "app.py"]
+# Comando padrão
+CMD ["python", "app.py"]
