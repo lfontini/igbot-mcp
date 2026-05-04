@@ -648,6 +648,17 @@ def get_zabbix_service_analysis(service: str, hours: int = 12):
     zabbix_service = ZabbixPingCheckAction()
     return zabbix_service.zabbix_troubleshooting(service, hours=hours)
 
+@mcp.tool(
+    name="get_zabbix_all_hosts_analysis",
+    description="Get Zabbix analysis for all hosts.",
+)
+def get_zabbix_all_hosts_analysis(hours: int = 12):
+    """
+    Get Zabbix analysis for all hosts in Zabbix.
+    """
+    zabbix_service = ZabbixPingCheckAction()
+    return zabbix_service.zabbix_troubleshooting_all_hosts(hours=hours)
+
 @mcp.prompt(title="Troubleshooting cpe")
 def troubleshooting(service: str) -> str:
     

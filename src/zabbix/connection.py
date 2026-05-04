@@ -13,10 +13,22 @@ class ZabbixPingCheckAction():
 
     def get_host_id(self, zapi, host_name):
         hosts = zapi.host.get(search={'host': host_name}, output=['hostid', 'host'])
+        print(f"Hosts encontrados para '{host_name}': {[host['host'] for host in hosts]}")  # Debug: Lista os hosts encontrados
         return hosts[0]['hostid'] if hosts else None
+
+    def get_all_host_ids(self, zapi, host_name):
+        """
+        Retrieves all hosts that match the given host_name from Zabbix.
+        Returns a list of dictionaries with hostid and host name.
+        """
+        hosts = zapi.host.get(search={'host': host_name}, output=['hostid', 'host'])
+        print(f"Hosts encontrados para '{host_name}': {[host['host'] for host in hosts]}")  # Debug: Lista os hosts encontrados
+        return hosts if hosts else []
+
 
     def get_item_id(self, zapi, host_id, item_key):
         items = zapi.item.get(filter={'hostid': host_id, 'key_': item_key})
+        print(f"Items encontrados para '{item_key}': {[item['key_'] for item in items]}")  # Debug: Lista os items encontrados
         if not items:
             ping_key = "icmpping[,20,300,,]"
             items = zapi.item.get(filter={'hostid': host_id, 'key_': ping_key})
@@ -122,83 +134,133 @@ class ZabbixPingCheckAction():
         ping_loss_key = "icmppingloss[,20,200,,]"
         zapi = self.connect_to_zabbix()
 
-        host_id = self.get_host_id(zapi, service)
-        if not host_id:
+        # Get all hosts matching the service name
+        all_hosts = self.get_all_host_ids(zapi, service)
+        if not all_hosts:
             return {
                 'status': "unknown",
                 'message': "Service not found on Zabbix",
                 'result_type': '2',
-                'interruptions': None,
-                'total_unavailable_time': None,
-                'last_interruption_time': None,
-                'back_to_up_at': None,
-                'responsibility': "unknown",
-                'issue_type': "unknown",
-                'reason': "Not found on Zabbix",
-                'packet_loss_events': []
-                
+                'service': service,
+                'total_hosts': 0,
+                'hosts_analyzed': [],
+                'reason': "Not found on Zabbix"
             }
 
-        item_id_ping = self.get_item_id(zapi, host_id, ping_key)
-        current_status = self.get_current_status(zapi, host_id, ping_key)
-        ping_history = self.get_historical_data(zapi, item_id_ping, hours=hours)
+        print(f"Processando troubleshooting para {len(all_hosts)} host(s) do serviço '{service}'")
+        hosts_analyzed = []
 
-        item_id_loss = self.get_item_id(zapi, host_id, ping_loss_key)
-        ping_loss_history = self.get_packet_loss_events(zapi, host_id, item_id_loss, hours=hours, threshold=0.0)
+        # Process each host found for this service
+        for host in all_hosts:
+            host_id = host['hostid']
+            host_name = host['host']
+            
+            try:
+                print(f"Analisando host: {host_name}")
+                
+                item_id_ping = self.get_item_id(zapi, host_id, ping_key)
+                if not item_id_ping:
+                    print(f"Aviso: Nenhum item de ping encontrado para {host_name}")
+                    hosts_analyzed.append({
+                        'host': host_name,
+                        'host_id': host_id,
+                        'status': 'error',
+                        'message': 'No ping item found',
+                        'reason': 'Missing ping monitoring data'
+                    })
+                    continue
 
-        interruptions, total_unavailable_time, last_interruption_time, back_to_up_at = self.calculate_downtimes(ping_history)
+                current_status = self.get_current_status(zapi, host_id, ping_key)
+                ping_history = self.get_historical_data(zapi, item_id_ping, hours=hours)
 
-        two_hours_ago = datetime.now(timezone.utc) - timedelta(hours=2)
-        recent_interruptions = last_interruption_time and last_interruption_time >= two_hours_ago
-        print("recent interruption " , recent_interruptions)
+                item_id_loss = self.get_item_id(zapi, host_id, ping_loss_key)
+                ping_loss_history = self.get_packet_loss_events(zapi, host_id, item_id_loss, hours=hours, threshold=0.0) if item_id_loss else []
 
-        # Análise de packet loss nas últimas 2 horas
-        recent_packet_loss = False
-        last_packet_loss_time = None
-        max_packet_loss = 0.0
-        for event in ping_loss_history:
-            event_time = datetime.strptime(event['timestamp'], '%Y-%m-%d %H:%M:%S')
-            event_time = event_time.replace(tzinfo=timezone.utc)  # Adiciona timezone UTC
-            if event_time >= two_hours_ago:
-                recent_packet_loss = True
-                last_packet_loss_time = event_time
-                if event['packet_loss_percent'] > max_packet_loss:
-                    max_packet_loss = event['packet_loss_percent']
+                interruptions, total_unavailable_time, last_interruption_time, back_to_up_at = self.calculate_downtimes(ping_history)
 
-        # Lógica de decisão
-        if current_status == "down":
-            message = f"Down since {last_interruption_time.strftime('%Y-%m-%d %H:%M:%S UTC')}" if last_interruption_time else "Currently down"
-            responsibility = "vendor"
-            reason = "Service is down on Zabbix"
-            issue_type = "outage"
-        elif recent_packet_loss:
-            message = f"Service active with recent packet loss (Max: {max_packet_loss}%) at {last_packet_loss_time.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-            responsibility = "vendor"
-            reason = f"Packet loss detected in the last 2 hours (Max: {max_packet_loss}%)"
-            issue_type = "degradation"
-        elif recent_interruptions:
-            message = f"Service active but had an outage between {last_interruption_time.strftime('%Y-%m-%d %H:%M:%S UTC')} and {back_to_up_at.strftime('%Y-%m-%d %H:%M:%S UTC')}" if last_interruption_time and back_to_up_at else "Service active with recent interruptions"
-            responsibility = "vendor"
-            reason = "Service had recent interruptions"
-            issue_type = "degradation"
-        else:
-            message = "Service active for more than 2 hours with no issues"
-            responsibility = "customer"
-            reason = "Service up on Zabbix with no interruptions or packet loss in the last 2 hours"
-            issue_type = "unknown"
+                two_hours_ago = datetime.now(timezone.utc) - timedelta(hours=2)
+                recent_interruptions = last_interruption_time and last_interruption_time >= two_hours_ago
+                
+                # Análise de packet loss nas últimas 2 horas
+                recent_packet_loss = False
+                last_packet_loss_time = None
+                max_packet_loss = 0.0
+                for event in ping_loss_history:
+                    event_time = datetime.strptime(event['timestamp'], '%Y-%m-%d %H:%M:%S')
+                    event_time = event_time.replace(tzinfo=timezone.utc)
+                    if event_time >= two_hours_ago:
+                        recent_packet_loss = True
+                        last_packet_loss_time = event_time
+                        if event['packet_loss_percent'] > max_packet_loss:
+                            max_packet_loss = event['packet_loss_percent']
+
+                # Lógica de decisão
+                if current_status == "down":
+                    message = f"Down since {last_interruption_time.strftime('%Y-%m-%d %H:%M:%S UTC')}" if last_interruption_time else "Currently down"
+                    responsibility = "vendor"
+                    reason = "Service is down on Zabbix"
+                    issue_type = "outage"
+                elif recent_packet_loss:
+                    message = f"Service active with recent packet loss (Max: {max_packet_loss}%) at {last_packet_loss_time.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                    responsibility = "vendor"
+                    reason = f"Packet loss detected in the last 2 hours (Max: {max_packet_loss}%)"
+                    issue_type = "degradation"
+                elif recent_interruptions:
+                    message = f"Service active but had an outage between {last_interruption_time.strftime('%Y-%m-%d %H:%M:%S UTC')} and {back_to_up_at.strftime('%Y-%m-%d %H:%M:%S UTC')}" if last_interruption_time and back_to_up_at else "Service active with recent interruptions"
+                    responsibility = "vendor"
+                    reason = "Service had recent interruptions"
+                    issue_type = "degradation"
+                else:
+                    message = "Service active for more than 2 hours with no issues"
+                    responsibility = "customer"
+                    reason = "Service up on Zabbix with no interruptions or packet loss in the last 2 hours"
+                    issue_type = "unknown"
+
+                hosts_analyzed.append({
+                    'host': host_name,
+                    'host_id': host_id,
+                    'status': current_status,
+                    'message': message,
+                    'period': hours,
+                    'interruptions': interruptions,
+                    'total_unavailable_time': str(total_unavailable_time),
+                    'last_interruption_time': last_interruption_time.strftime('%Y-%m-%d %H:%M:%S UTC') if last_interruption_time else 'N/A',
+                    'back_to_up_at': back_to_up_at.strftime('%Y-%m-%d %H:%M:%S UTC') if back_to_up_at else 'N/A',
+                    'responsibility': responsibility,
+                    'reason': reason,
+                    'issue_type': issue_type,
+                    'packet_loss_events': ping_loss_history
+                })
+
+            except Exception as e:
+                print(f"Erro ao analisar host {host_name}: {str(e)}")
+                hosts_analyzed.append({
+                    'host': host_name,
+                    'host_id': host_id,
+                    'status': 'error',
+                    'message': f'Error analyzing host: {str(e)}',
+                    'reason': str(e)
+                })
+
+        # Resumo dos resultados
+        up_count = sum(1 for h in hosts_analyzed if h.get('status') == 'up')
+        down_count = sum(1 for h in hosts_analyzed if h.get('status') == 'down')
+        error_count = sum(1 for h in hosts_analyzed if h.get('status') == 'error')
+        
+        # Status geral do serviço
+        overall_status = 'down' if down_count > 0 else ('up' if up_count > 0 else 'unknown')
 
         return {
-            'status': current_status,
-            'message': message,
+            'status': overall_status,
+            'service': service,
+            'total_hosts': len(all_hosts),
+            'hosts_up': up_count,
+            'hosts_down': down_count,
+            'hosts_error': error_count,
             'period': hours,
-            'interruptions': interruptions,
-            'total_unavailable_time': str(total_unavailable_time),
-            'last_interruption_time': last_interruption_time.strftime('%Y-%m-%d %H:%M:%S UTC') if last_interruption_time else 'N/A',
-            'back_to_up_at': back_to_up_at.strftime('%Y-%m-%d %H:%M:%S UTC') if back_to_up_at else 'N/A',
-            'responsibility': responsibility,
             'result_type': '2',
-            'reason': reason,
-            'issue_type': issue_type,
-            'packet_loss_events': ping_loss_history
+            'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'),
+            'hosts_analyzed': hosts_analyzed
         }
+    
     
